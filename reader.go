@@ -55,6 +55,11 @@ type FileHeader struct {
 	Version          int       // file version
 }
 
+// VolumeInfo contains metadata about a single RAR volume.
+type VolumeInfo struct {
+	Number int // volume number (0-based)
+}
+
 // Mode returns an fs.FileMode for the file, calculated from the Attributes field.
 func (f *FileHeader) Mode() fs.FileMode {
 	var m fs.FileMode
@@ -712,6 +717,17 @@ func NewReader(r io.Reader, opts ...Option) (*Reader, error) {
 	}
 	rdr := newReader(v, options)
 	return &rdr, nil
+}
+
+// ReadVolumeInfo reads volume-level metadata from a single RAR volume.
+// It auto-detects the volume number from the archive header.
+func ReadVolumeInfo(r io.Reader, opts ...Option) (*VolumeInfo, error) {
+	options := getOptions(opts)
+	v, err := newVolume(r, options, -1)
+	if err != nil {
+		return nil, err
+	}
+	return &VolumeInfo{Number: v.num}, nil
 }
 
 // ReadCloser is a Reader that allows closing of the rar archive.

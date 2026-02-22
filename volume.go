@@ -146,9 +146,15 @@ func (v *readerVolume) init(r io.Reader, volnum int) error {
 	if err != nil {
 		return err
 	}
-	v.num = volnum
-	if n >= 0 && n != volnum {
-		return ErrBadVolumeNumber
+	if volnum < 0 {
+		if n >= 0 {
+			v.num = n
+		}
+	} else {
+		v.num = volnum
+		if n >= 0 && n != volnum {
+			return ErrBadVolumeNumber
+		}
 	}
 	return nil
 }
