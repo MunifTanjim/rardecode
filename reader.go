@@ -727,7 +727,42 @@ func ReadVolumeInfo(r io.Reader, opts ...Option) (*VolumeInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	// For RAR 1.5, the volume number is in the end-of-archive block, not the archive header.
+	if v.ver == archiveVersion15 {
+		// Fast path: read only the tail of the file via io.ReaderAt.
+		if ra, ok := r.(io.ReaderAt); ok {
+			if size := readerFileSize(r); size > 0 {
+				if n := readTailVolNum(ra, size); n >= 0 {
+					return &VolumeInfo{Number: n}, nil
+				}
+			}
+		}
+		// Fallback: iterate all blocks to reach the end-of-archive block.
+		for {
+			_, err := v.nextBlock()
+			if err != nil {
+				break
+			}
+		}
+		if n := v.arc.volNum(); n >= 0 {
+			v.num = n
+		}
+	}
 	return &VolumeInfo{Number: v.num}, nil
+}
+
+// readerFileSize returns the size of the underlying file for the given reader,
+// or -1 if it cannot be determined without reading.
+func readerFileSize(r io.Reader) int64 {
+	if f, ok := r.(interface{ Size() int64 }); ok {
+		return f.Size()
+	}
+	if f, ok := r.(interface{ Stat() (fs.FileInfo, error) }); ok {
+		if info, err := f.Stat(); err == nil {
+			return info.Size()
+		}
+	}
+	return -1
 }
 
 // ReadCloser is a Reader that allows closing of the rar archive.

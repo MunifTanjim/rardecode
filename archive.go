@@ -105,4 +105,5 @@ type archiveBlockReader interface {
 	init(br *bufVolumeReader) (int, error)                   // init volume and returns optional (>=0) volume number
 	nextBlock(br *bufVolumeReader) (*fileBlockHeader, error) // reads the volume and returns the next fileBlockHeader
 	useOldNaming() bool
+	volNum() int // current volume number (-1 if unknown)
 }

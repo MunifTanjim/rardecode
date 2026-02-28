@@ -44,7 +44,12 @@ const (
 	fileExtTime     = 0x1000
 
 	// end block flags
-	endArcNotLast = 0x0001
+	endArcNotLast   = 0x0001
+	endArcDataCRC   = 0x0002
+	endArcVolNumber = 0x0008
+
+	// archive block flags (additional)
+	arcFirstVolume = 0x0100
 
 	saltSize    = 8 // size of salt for calculating AES keys
 	cacheSize30 = 4 // number of AES keys to cache
@@ -68,6 +73,7 @@ type archive15 struct {
 	solid     bool // archive is a solid archive
 	encrypted bool
 	oldNaming bool
+	endVolNum int                   // volume number from end block or first-volume flag (-1 = unknown)
 	pass      []uint16              // password in UTF-16
 	keyCache  [cacheSize30]struct { // cache of previously calculated decryption keys
 		salt []byte
@@ -78,6 +84,60 @@ type archive15 struct {
 
 func (a *archive15) useOldNaming() bool {
 	return a.oldNaming
+}
+
+func (a *archive15) volNum() int {
+	return a.endVolNum
+}
+
+// readEndVolNum scans a tail byte slice (the end of a RAR 1.5 archive volume)
+// for a valid end-of-archive block and returns the volume number, or -1 if not found.
+// The tail must end exactly at EOF so the end block ends at len(tail).
+func readEndVolNum(tail []byte) int {
+	for i := len(tail) - 7; i >= 0; i-- {
+		if tail[i+2] != blockEnd {
+			continue
+		}
+		b := readBuf(tail[i:])
+		crc := b.uint16()
+		_ = b.byte() // type (already checked)
+		flags := b.uint16()
+		size := int(b.uint16())
+		if size < 7 || i+size != len(tail) {
+			continue
+		}
+		// Verify CRC16 over bytes [type..end of header]
+		hash := crc32.NewIEEE()
+		hash.Write(tail[i+2 : i+size])
+		if crc != uint16(hash.Sum32()) {
+			continue
+		}
+		if flags&endArcVolNumber == 0 {
+			return -1
+		}
+		b = readBuf(tail[i+7:])
+		if flags&endArcDataCRC > 0 {
+			if len(b) < 4 {
+				return -1
+			}
+			_ = b.uint32() // skip 4-byte data CRC
+		}
+		if len(b) < 2 {
+			return -1
+		}
+		return int(b.uint16())
+	}
+	return -1
+}
+
+// readTailVolNum reads the last 64 bytes of the reader via ReadAt and
+// extracts the RAR 1.5 end-of-archive volume number.
+func readTailVolNum(ra io.ReaderAt, size int64) int {
+	const tailSize = 64
+	off := max(size-tailSize, 0)
+	tail := make([]byte, size-off)
+	n, _ := ra.ReadAt(tail, off)
+	return readEndVolNum(tail[:n])
 }
 
 // Calculates the key and iv for AES decryption given a password and salt.
@@ -348,6 +408,9 @@ func (a *archive15) parseArcBlock(h *blockHeader15) error {
 	a.multi = h.flags&arcVolume > 0
 	a.oldNaming = h.flags&arcNewNaming == 0
 	a.solid = h.flags&arcSolid > 0
+	if h.flags&arcFirstVolume > 0 {
+		a.endVolNum = 0
+	}
 	if a.encrypted && a.pass == nil {
 		return ErrArchiveEncrypted
 	}
@@ -436,6 +499,7 @@ func (a *archive15) readBlockHeader(r byteReader) (*blockHeader15, error) {
 
 func (a *archive15) init(br *bufVolumeReader) (int, error) {
 	a.encrypted = false // reset encryption when opening new volume file
+	a.endVolNum = -1
 	h, err := a.readBlockHeader(br)
 	if err != nil {
 		if err == io.EOF {
@@ -446,7 +510,7 @@ func (a *archive15) init(br *bufVolumeReader) (int, error) {
 	} else {
 		err = a.parseArcBlock(h)
 	}
-	return -1, err
+	return a.endVolNum, err
 }
 
 // nextBlock advances to the next file block in the archive
@@ -464,6 +528,15 @@ func (a *archive15) nextBlock(br *bufVolumeReader) (*fileBlockHeader, error) {
 		case blockFile:
 			return a.parseFileHeader(h)
 		case blockEnd:
+			b := h.data
+			if h.flags&endArcDataCRC > 0 {
+				if len(b) >= 4 {
+					b = b[4:] // skip 4-byte CRC
+				}
+			}
+			if h.flags&endArcVolNumber > 0 && len(b) >= 2 {
+				a.endVolNum = int(b.uint16())
+			}
 			if h.flags&endArcNotLast == 0 || !a.multi {
 				return nil, io.EOF
 			}

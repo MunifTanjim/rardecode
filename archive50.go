@@ -126,6 +126,10 @@ func (a *archive50) useOldNaming() bool {
 	return false
 }
 
+func (a *archive50) volNum() int {
+	return -1
+}
+
 // calcKeys50 calculates the keys used in RAR 5 archive processing.
 // The returned slice of byte slices contains 3 keys.
 // Key 0 is used for block or file decryption.
