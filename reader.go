@@ -42,6 +42,7 @@ type FileHeader struct {
 	Name             string    // file name using '/' as the directory separator
 	IsDir            bool      // is a directory
 	Solid            bool      // is a solid file
+	Compressed       bool      // file contents are compressed
 	Encrypted        bool      // file contents are encrypted
 	HeaderEncrypted  bool      // file header is encrypted
 	HostOS           byte      // Host OS the archive was created on

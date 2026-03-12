@@ -332,6 +332,7 @@ func (a *archive15) parseFileHeader(h *blockHeader15) (*fileBlockHeader, error) 
 	f.ModificationTime = parseDosTime(b.uint32())
 	unpackver := b.byte()     // decoder version
 	method := b.byte() - 0x30 // decryption method
+	f.Compressed = method != 0
 	namesize := int(b.uint16())
 	f.Attributes = int64(b.uint32())
 	if h.flags&fileLargeData > 0 {
